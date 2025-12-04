@@ -1,0 +1,99 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse-server
+    ports:
+      - '8123:8123' #HTTP default port
+      - '9010:9000' #Native protocol port
+    environment:
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER} 
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_DB=${CLICKHOUSE_DB}
+    volumes:
+      - ./clickhouse:/docker-entrypoint-initdb.d/
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s 
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio-server
+    ports: 
+      - "9000:9000" # S3 API port
+      - "9001:9001" # Console UI port 
+    environment:
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME}
+    command: ["server", "--console-address", ":9001", "/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  prefect-db:
+    image: postgres:15 
+    container_name: prefect-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - prefect_db_data:/var/lib/postgresql 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prefect"]
+      interval: 15s 
+      timeout: 10s  
+      retries: 10  
+      start_period: 45s 
+    restart: unless-stopped
+
+  prefect-server:
+    image: prefecthq/prefect:3-latest
+    container_name: prefect-server
+    command: prefect server start --host 0.0.0.0 --port 4200
+    ports:
+      - "4200:4200" 
+    environment:
+      PREFECT_SERVER_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:prefect@prefect-db:5432/prefect
+    depends_on:
+      prefect-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prefect-worker:
+    build:
+      context: . 
+      dockerfile: dockerfile
+    container_name: prefect-worker
+    command: |
+      bash -c "
+        sleep 30 && \
+        prefect worker start --pool default --name weather-worker
+      "
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME}
+      - PREFECT_API_URL=${PREFECT_API_URL}
+      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST} 
+      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT} 
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER} 
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD} 
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    volumes:
+      - .:/app  
+    working_dir: /app
+    depends_on:
+      - prefect-server
+    restart: unless-stopped
+
+volumes:
+  prefect_db_data:

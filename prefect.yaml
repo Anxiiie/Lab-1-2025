@@ -1,0 +1,19 @@
+name: weather-etl-project
+prefect-version: 3.0.0
+
+collections:
+  - prefect
+
+builds: []
+push: null
+pull: null
+
+deployments:
+  - name: weather-etl-5min
+    entrypoint: weather_etl.py:weather_etl
+    work_pool_name: default
+    schedule:
+      cron: "*/5 * * * *"
+    tags:
+      - weather
+      - etl

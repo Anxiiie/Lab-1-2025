@@ -1,0 +1,7 @@
+prefect
+clickhouse-connect
+minio
+requests
+python-dotenv
+pytz
+prefect-sqlalchemy 
